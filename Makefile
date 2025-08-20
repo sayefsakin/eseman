@@ -4,20 +4,16 @@ CC = g++
 # compiler flags:
 #  -g     - this flag adds debugging information to the executable file
 #  -Wall  - this flag is used to turn on most compiler warnings
-CFLAGS  = -g -Wall -Ofast -Wno-stringop-overflow -march=native -mtune=native -flto=auto -funroll-loops -fno-plt #-O3 #-D_DEBUG
-# CFLAGS = -g -Wall -D_DEBUG
+# CFLAGS  = -g -Wall -Ofast -Wno-stringop-overflow -march=native -mtune=native -flto=auto -funroll-loops -fno-plt #-O3 #-D_DEBUG
+CFLAGS = -g -Wall -D_DEBUG
 
 AGC_CFLAGS = -Wall -g -DNO_INCLUDE_FENV
 LDFLAGS = -lstdc++ -llmdb
 
 # The build target 
-TARGET = Server
-CGAL_SERVER = cgal_data_server
+ESEMAN_SERVER = eseman_data_server
 INCLUDE = -I./rapidjson/include
 
-CLIENT = Client
-CGET = curl_get
-OBKDT = optimized_binned_kdt
 AGC = agglomerate_clustering
 ESEMAN = eseman_kdt
 
@@ -27,10 +23,10 @@ LULESH_ID = 772c7330-d4eb-485b-866a-3b315063f9af
 KMENAS_LARGE_ID = c3d5e8fe-32df-4f4f-8cbb-4ba6fabd7d3d
 DATASET_ID ?= $(KMEANS_ID)
 
-all: $(CGAL_SERVER).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o
-	$(RM) $(CGAL_SERVER)
-	$(CC) $(CFLAGS) -o $(CGAL_SERVER) $(CGAL_SERVER).cpp $(CGET).cpp $(OBKDT).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o $(INCLUDE) -lcurl -llmdb
-#	./$(CGAL_SERVER) $(DATASET_ID) false
+all: $(ESEMAN_SERVER).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o
+	$(RM) $(ESEMAN_SERVER)
+	$(CC) $(CFLAGS) -o $(ESEMAN_SERVER) $(ESEMAN_SERVER).cpp $(CGET).cpp $(OBKDT).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o $(INCLUDE) -lcurl -llmdb
+#	./$(ESEMAN_SERVER) $(DATASET_ID) false
 
 $(AGC): $(AGC).cpp fastcluster.o
 	$(RM) $(AGC)
