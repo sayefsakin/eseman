@@ -1,6 +1,11 @@
 #include "eseman_data_server.h"
 #include <iomanip>
 
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/filereadstream.h"
+
 using namespace std;
 
 // short name, long name, argument name, default value, description
@@ -113,41 +118,76 @@ int main(int argc, char* argv[]) {
     args["port"] = "8080"; // Default port
     AgglomerateClusters *agglomerateClusters = nullptr;
     EseManKDT *esemanKDT = nullptr;
-    int horizontal_resolution_divisor = 1;
-    string data_backup_location = "/mnt/d/traveler_dataset_backups";
 
     int c = process_input_arguments(argc, argv, args);
     if (c != 0) {
         return c;
     }
 
+#ifdef _DEBUG
     cout << "Parsed arguments:" << endl;
     for (const auto& [key, value] : args) {
         cout << "  " << key << ": " << value << endl;
     }
-    // if (args.find("input") != args.end()) {
-    //     cout << "Input file: " << args["input"] << endl;
-    // }
+#endif
 
-    // ESEMAN_MODELS eseman_model = ESEMAN_MODELS::KDT;
-    // if (args.find("model") != args.end() && args["model"] == string("AGC")) {
-    //     eseman_model = ESEMAN_MODELS::AGC;
-    // } else if (args.find("model") != args.end() && args["model"] == string("ODKDT")) {
-    //     eseman_model = ESEMAN_MODELS::ODKDT;
-    // }
+    ESEMAN_MODELS eseman_model = ESEMAN_MODELS::KDT;
+    if (args.find("model") != args.end() && args["model"] == string("AGC")) {
+        eseman_model = ESEMAN_MODELS::AGC;
+    } else if (args.find("model") != args.end() && args["model"] == string("ODKDT")) {
+        eseman_model = ESEMAN_MODELS::ODKDT;
+    }
 
-    // if(eseman_model == ESEMAN_MODELS::AGC) {
-    //     agglomerateClusters = new AgglomerateClusters();
-    //     agglomerateClusters->horizontal_resolution_divisor = horizontal_resolution_divisor;
-    // } else {
-    //     esemanKDT = new EseManKDT();
-    //     esemanKDT->horizontal_resolution_divisor = horizontal_resolution_divisor;
-    //     if (eseman_model == ESEMAN_MODELS::ODKDT) {
-    //         esemanKDT->is_vertical_split = true;
-    //     }
-    //     // esemanKDT->setDatasetID(urlparser.datasetId);
-    //     esemanKDT->node_storage_base_path = data_backup_location;
-    // }
+
+    string config_file = "./config.json";
+    FILE* fp = fopen(config_file.c_str(), "rb");
+    if (!fp) {
+        cerr << "Failed to open config file: " << config_file << endl;
+        return 1;
+    }
+    char readBuffer[65536];
+    rapidjson::FileReadStream is(fp, readBuffer, sizeof(readBuffer));
+    rapidjson::Document doc;
+    if (doc.ParseStream(is).HasParseError()) {
+        cerr << "Error parsing config file: " << config_file << endl;
+        fclose(fp);
+        return 1;
+    }
+    fclose(fp);
+
+    if(doc.IsNull() || !doc.IsObject() || !doc.HasMember("default") || !doc["default"].IsObject()) {
+        cerr << "Config file is not a valid JSON object." << endl;
+        return 1;
+    }
+
+    if(eseman_model == ESEMAN_MODELS::AGC) {
+        agglomerateClusters = new AgglomerateClusters();
+        agglomerateClusters->horizontal_resolution_divisor = doc["default"].GetObject()["horizontal_pixel_window"].GetInt();
+    } else {
+        esemanKDT = new EseManKDT();
+        esemanKDT->horizontal_resolution_divisor = doc["default"].GetObject()["horizontal_pixel_window"].GetInt();
+        esemanKDT->vertical_resolution_divisor = doc["default"].GetObject()["vertical_pixel_window"].GetInt();
+        if (eseman_model == ESEMAN_MODELS::ODKDT) {
+            esemanKDT->is_vertical_split = true;
+        }
+        esemanKDT->setDatasetID(doc["default"].GetObject()["database_name"].GetString());
+        esemanKDT->node_storage_base_path = doc["default"].GetObject()["database_location"].GetString();
+        esemanKDT->lmdb_database_total_size = stoll(doc["default"].GetObject()["LMDB_DATABASE_TOTAL_SIZE"].GetString());
+        esemanKDT->ESEMAN_SPLITTING_RULE = doc["default"].GetObject()["ESEMAN_SPLITTING_RULE"].GetString();
+        esemanKDT->ESEMAN_TASK_COUNT = doc["default"].GetObject()["ESEMAN_TASK_COUNT"].GetInt();
+        esemanKDT->ESEMAN_TASK_ID = doc["default"].GetObject()["ESEMAN_TASK_ID"].GetInt();
+#ifdef _DEBUG        
+        cout << "values from config file: " << endl;
+        cout << "  horizontal_pixel_window: " << esemanKDT->horizontal_resolution_divisor << endl;
+        cout << "  vertical_pixel_window: " << esemanKDT->vertical_resolution_divisor << endl;
+        cout << "  database_location: " << esemanKDT->node_storage_base_path << endl;
+        // cout << "  database_name: " << esemanKDT->getDatasetID() << endl;
+        cout << "  lmdb_database_total_size: " << esemanKDT->lmdb_database_total_size << endl;
+        cout << "  ESEMAN_SPLITTING_RULE: " << esemanKDT->ESEMAN_SPLITTING_RULE << endl;
+        cout << "  ESEMAN_TASK_COUNT: " << esemanKDT->ESEMAN_TASK_COUNT << endl;
+        cout << "  ESEMAN_TASK_ID: " << esemanKDT->ESEMAN_TASK_ID << endl;
+#endif
+    }
 
     return 0;
 }

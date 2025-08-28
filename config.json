@@ -1,0 +1,24 @@
+{
+    "default": {
+        "horizontal_pixel_window": 1,
+        "vertical_pixel_window": 1,
+        "database_location": "/mnt/d/eseman_dataset_backups",
+        "database_name": "kmeans",
+        "LMDB_DATABASE_TOTAL_SIZE": "1073741824",
+        "ESEMAN_SPLITTING_RULE": "FAIR",
+        "ESEMAN_TASK_COUNT": 0,
+        "ESEMAN_TASK_ID": 0
+    },
+    "horizontal_pixel_window": "Number of pixels to summerize in the horizontal direction",
+    "vertical_pixel_window": "Number of pixels to summerize in the vertical direction",
+    "database_location": "LMDB database location",
+    "database_name": "LMDB database folder name",
+    "LMDB_DATABASE_TOTAL_SIZE": "Total size of the LMDB database in bytes (1GB by default)",
+    "ESEMAN_TASK_COUNT": "Number of parallel tasks (0 for single task)",
+    "ESEMAN_TASK_ID": "Task ID (0 to ESEMAN_TASK_COUNT-1)",
+    "ESEMAN_SPLITTING_RULE": {
+        "FAIR": "Divide events equally", 
+        "MIDPOINT": "Divide in the midpoint of the minimum and maximum event time",
+        "MAX-DISTANCE": "Divide at the point of maximum distance between consecutive events"
+    }
+}

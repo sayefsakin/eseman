@@ -127,9 +127,7 @@ string EseManKDT::constructKDTPerTrack(size_t start_index, size_t end_index, siz
         return result_uuid;
     }
 
-    string splitting_rule("FAIR");
-    char* ntask_str = getenv("ESEMAN_SPLITTING_RULE");
-    if(ntask_str != NULL) splitting_rule = string(ntask_str);
+    string splitting_rule = ESEMAN_SPLITTING_RULE;
 
     size_t mid_index = start_index+2;
     if(splitting_rule == "MIDPOINT") {
@@ -958,11 +956,8 @@ void EseManKDT::buildKDT() {
     }
 
     if(eseman_node_uuids.empty()) eseman_node_uuids = vector<string>(event_data_values.size(), "");
-    char* ntask_str = getenv("ESEMAN_TASK_COUNT");
-    int ntask = ntask_str ? atoi(ntask_str) : 0;
-
-    char* procid_str = getenv("ESEMAN_TASK_ID");
-    int procid = procid_str ? atoi(procid_str) : 0;
+    int ntask = ESEMAN_TASK_COUNT;
+    int procid = ESEMAN_TASK_ID;
 
     size_t starting_chunk_index = 0;
     size_t ending_chunk_index = event_data_values.size() - 1;

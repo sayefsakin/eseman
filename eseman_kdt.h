@@ -79,10 +79,9 @@ private:
         return false;
     }
 
-    char *pds = getenv("LMDB_DATABASE_TOTAL_SIZE");
-    mdb_env_set_mapsize(env, pds == NULL ? LMDB_DATABASE_TOTAL_SIZE : stoll(pds));
+    mdb_env_set_mapsize(env, lmdb_database_total_size < 0 ? LMDB_DATABASE_TOTAL_SIZE : lmdb_database_total_size);
 
-    string dataset_path = node_storage_base_path + "/" + dataset_id + "/traveler.db";
+    string dataset_path = node_storage_base_path + "/" + dataset_id + "/eseman.db";
     rc = mdb_env_open(env, dataset_path.c_str(), MDB_NOSUBDIR | MDB_NORDAHEAD, 0664);
     if (rc) {
         PRINTLOG("mdb_env_open failed, error " << rc);
@@ -149,10 +148,15 @@ private:
   void writeNodeUuidAtIndex(string uuid, size_t index);
 
 public:
-  int horizontal_resolution_divisor = 1;
-  int vertical_resolution_divisor = 1;
-  bool is_vertical_split = false;
-  string node_storage_base_path = ".";
+  int                 horizontal_resolution_divisor = 1;
+  int                 vertical_resolution_divisor = 1;
+  bool                is_vertical_split = false;
+  string              node_storage_base_path = ".";
+
+  uint64_t            lmdb_database_total_size = -1; // in bytes, -1 means use default 1GB
+  string              ESEMAN_SPLITTING_RULE = "FAIR";
+  int                 ESEMAN_TASK_COUNT = 0;
+  int                 ESEMAN_TASK_ID = 0;
   
   EseManKDT() {
       // Constructor logic if needed
