@@ -20,7 +20,7 @@ ESEMAN = eseman_kdt
 all: $(ESEMAN_SERVER).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o
 	$(RM) $(ESEMAN_SERVER)
 	$(CC) $(CFLAGS) -o $(ESEMAN_SERVER) $(ESEMAN_SERVER).cpp $(AGC).cpp $(ESEMAN).cpp fastcluster.o $(INCLUDE) -lcurl -llmdb
-	./$(ESEMAN_SERVER) -h
+	./$(ESEMAN_SERVER) -b -i /mnt/d/all_traveler_otf2_files/all_data/json_data/faf17535-2f66-4621-995f-49c7dbd84e8b.json
 
 $(AGC): $(AGC).cpp fastcluster.o
 	$(RM) $(AGC)

@@ -7,4 +7,11 @@
 #include "eseman_kdt.h"
 #include "agglomerate_clustering.h"
 
+#include "rapidjson/error/en.h"
+#include "rapidjson/document.h"
+#include "rapidjson/reader.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/filereadstream.h"
+
 #endif // ESEMAN_DATA_SERVER_H_

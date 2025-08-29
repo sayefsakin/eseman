@@ -1,17 +1,92 @@
 #include "eseman_data_server.h"
 #include <iomanip>
+#include <filesystem>
 
-#include "rapidjson/document.h"
-#include "rapidjson/writer.h"
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/filereadstream.h"
-
+using namespace rapidjson;
 using namespace std;
+
+//TODO: dynamically tune the buffer size for larger files to improve I/O performance
+#define DEFAULT_READ_BUFFER_SIZE 256*1024 // 256KB
 
 // short name, long name, argument name, default value, description
 typedef vector<tuple <string, string, string, string, string> > CMD_OPTIONS;
 
 enum class ESEMAN_MODELS { AGC, KDT, ODKDT };
+
+class ESeManJSONHandler : public BaseReaderHandler<UTF8<>, ESeManJSONHandler> {
+public:
+    int depth = 0;                // Current object/array nesting depth
+    bool inArrayRoot = false;     // True if we are inside the top-level array
+    std::string buffer;           // JSON buffer for one object
+
+    std::function<void(const std::string&)> onObject;
+
+    bool StartArray() {
+        if (!inArrayRoot && depth == 0) {
+            inArrayRoot = true;   // Root array starts
+        } else {
+            buffer.push_back('[');
+        }
+        depth++;
+        return true;
+    }
+
+    bool EndArray(SizeType) {
+        depth--;
+        if (depth > 0) {
+            buffer.push_back(']');
+        } else if (inArrayRoot && depth == 0) {
+            inArrayRoot = false; // Finished root array
+        }
+        return true;
+    }
+
+    bool StartObject() {
+        buffer.push_back('{');
+        depth++;
+        return true;
+    }
+
+    bool EndObject(SizeType) {
+        buffer.push_back('}');
+        depth--;
+        if (depth == 1 && inArrayRoot) {
+            // Top-level object just finished
+            if (onObject) onObject(buffer);
+            buffer.clear();
+        }
+        return true;
+    }
+
+    bool Key(const char* str, SizeType length, bool) {
+        if(buffer.size() > 0 && buffer.back() != '{' && buffer.back() != ',') {
+            buffer.push_back(',');
+        }
+        buffer.push_back('"');
+        buffer.append(str, length);
+        buffer.push_back('"');
+        buffer.push_back(':');
+        return true;
+    }
+
+    bool String(const char* str, SizeType length, bool) {
+        if(buffer.size() > 0 && buffer.back() == '"') {
+            buffer.push_back(',');
+        }
+        buffer.push_back('"');
+        buffer.append(str, length);
+        buffer.push_back('"');
+        return true;
+    }
+
+    bool Int(int i) { buffer += std::to_string(i); return true; }
+    bool Uint(unsigned u) { buffer += std::to_string(u); return true; }
+    bool Int64(int64_t i) { buffer += std::to_string(i); return true; }
+    bool Uint64(uint64_t u) { buffer += std::to_string(u); return true; }
+    bool Double(double d) { buffer += std::to_string(d); return true; }
+    bool Bool(bool b) { buffer += (b ? "true" : "false"); return true; }
+    bool Null() { buffer += "null"; return true; }
+};
 
 void printHelp(const char* progName, const CMD_OPTIONS& options) {
     cout << "Usage: " << progName << " [options]\n\n"
@@ -32,8 +107,9 @@ void printHelp(const char* progName, const CMD_OPTIONS& options) {
 
 int process_input_arguments(int argc, char* argv[], unordered_map<string, string>& args) {
     CMD_OPTIONS options = {
-        {"-h", "--help",    "",         "",     "Show this help message"},
-        {"-s", "--start",   "",         "",     "Start the server"},
+        {"-h", "--help",    "",         "",     "Show this help message."},
+        {"-s", "--start",   "",         "",     "Start the server."},
+        {"-b", "--bundle",  "",         "",     "Bundle the input file and store into LMDB."},
         {"-p", "--port",    "<PORT>",   "8080", "Server port"},
         {"-i", "--input",   "<FILE>",   "",     "Specify the event sequence input file location. The input file should be in JSON format."},
         {"-m", "--model",   "<MODEL>",  "KDT",  "Specify the data structure, AGC for agglomerative clustering, KDT for KD-Tree."}
@@ -67,6 +143,9 @@ int process_input_arguments(int argc, char* argv[], unordered_map<string, string
         }
         else if (arg == "-s" || arg == "--start") {
             args["start"] = "true";
+        }
+        else if (arg == "-b" || arg == "--bundle") {
+            args["bundle"] = "true";
         }
         else {
             int found_index = -1;
@@ -104,6 +183,12 @@ int process_input_arguments(int argc, char* argv[], unordered_map<string, string
         if (args["model"] != "AGC" && args["model"] != "KDT" && args["model"] != "ODKDT") {
             cerr << "Invalid model type: " << args["model"] << ". Supported models are AGC, KDT, ODKDT." << endl;
             return 1;
+        }
+        if (args.find("bundle") != args.end() && !args["bundle"].empty()) {
+            if (args.find("input") == args.end() || args["input"].empty()) {
+                cerr << "Input file must be specified when bundling." << endl;
+                return 1;
+            }
         }
     } catch (...) {
         cerr << "Error in input arguments" << endl;
@@ -145,9 +230,9 @@ int main(int argc, char* argv[]) {
         cerr << "Failed to open config file: " << config_file << endl;
         return 1;
     }
-    char readBuffer[65536];
-    rapidjson::FileReadStream is(fp, readBuffer, sizeof(readBuffer));
-    rapidjson::Document doc;
+    char readBuffer[DEFAULT_READ_BUFFER_SIZE];
+    FileReadStream is(fp, readBuffer, sizeof(readBuffer));
+    Document doc;
     if (doc.ParseStream(is).HasParseError()) {
         cerr << "Error parsing config file: " << config_file << endl;
         fclose(fp);
@@ -187,6 +272,71 @@ int main(int argc, char* argv[]) {
         cout << "  ESEMAN_TASK_COUNT: " << esemanKDT->ESEMAN_TASK_COUNT << endl;
         cout << "  ESEMAN_TASK_ID: " << esemanKDT->ESEMAN_TASK_ID << endl;
 #endif
+    }
+
+    if (args.find("input") != args.end() && !args["input"].empty()) {
+        filesystem::path path(args["input"].c_str());
+        esemanKDT->setDatasetID(path.stem().c_str());
+    }
+
+    // If bundle option is specified, bundle the input file and store into LMDB
+    if(args.find("bundle") != args.end()) {
+        
+        fp = fopen(args["input"].c_str(), "rb");
+        if (!fp) {
+            cerr << "Failed to open input file: " << args["input"] << endl;
+            return 1;
+        }
+        memset(readBuffer, 0, sizeof(readBuffer));
+        FileReadStream is(fp, readBuffer, sizeof(readBuffer));
+
+        Reader reader;
+        ESeManJSONHandler handler;
+
+        handler.onObject = [esemanKDT, agglomerateClusters](const std::string& jsonStr) {
+            // Remove trailing comma if present
+            std::string cleaned = jsonStr;
+            if (!cleaned.empty() && cleaned.back() == ',')
+                cleaned.pop_back();
+
+            Document d;
+            d.Parse(cleaned.c_str());
+            if (d.HasParseError()) {
+                std::cerr << "Parse error inside object: "
+                        << GetParseError_En(d.GetParseError()) << endl
+                        << cleaned
+                        << endl;
+                return;
+            }
+
+            if(agglomerateClusters != nullptr) {
+                agglomerateClusters->insertDataIntoTree((double)d["enter"]["Timestamp"].GetInt64(),
+                                                        (double)d["leave"]["Timestamp"].GetInt64(),
+                                                        d["Location"].GetString(),
+                                                        d["Primitive"].GetString(),
+                                                        d["intervalId"].GetString());
+            } else if(esemanKDT != nullptr) {
+                esemanKDT->insertDataIntoTree((double)d["enter"]["Timestamp"].GetInt64(),
+                                            (double)d["leave"]["Timestamp"].GetInt64(),
+                                            d["Location"].GetString(),
+                                            d["Primitive"].GetString(),
+                                            d["intervalId"].GetString());
+            } else {}
+        };
+
+        ParseResult ok = reader.Parse(is, handler);
+        if (!ok) {
+            std::cerr << "Parse error: " 
+                    << GetParseError_En(ok.Code()) 
+                    << " at offset " << ok.Offset() << "\n";
+        }
+        fclose(fp);
+
+        if(eseman_model == ESEMAN_MODELS::AGC) {
+            agglomerateClusters->buildAllAggClusters();
+        } else {
+            esemanKDT->buildKDT();
+        }
     }
 
     return 0;
