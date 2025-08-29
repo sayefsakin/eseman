@@ -4,6 +4,13 @@
 #include <unistd.h>
 #include <cstdlib>
 
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/version.hpp>
+#include <boost/asio.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/config.hpp>
+
 #include "eseman_kdt.h"
 #include "agglomerate_clustering.h"
 

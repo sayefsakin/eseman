@@ -5,6 +5,11 @@
 using namespace rapidjson;
 using namespace std;
 
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace net = boost::asio;
+using tcp = boost::asio::ip::tcp;
+
 //TODO: dynamically tune the buffer size for larger files to improve I/O performance
 #define DEFAULT_READ_BUFFER_SIZE 256*1024 // 256KB
 
@@ -198,6 +203,271 @@ int process_input_arguments(int argc, char* argv[], unordered_map<string, string
     return 0;
 }
 
+class HttpSession : public enable_shared_from_this<HttpSession> {
+    beast::tcp_stream stream_;
+    beast::flat_buffer buffer_;
+    http::request<http::string_body> req_;
+
+public:
+    explicit HttpSession(tcp::socket&& socket) : stream_(move(socket)) {}
+
+    void run() {
+        do_read();
+    }
+
+private:
+    void do_read() {
+        req_ = {};
+        stream_.expires_after(chrono::seconds(30));
+
+        http::async_read(stream_, buffer_, req_,
+            [self = shared_from_this()](beast::error_code ec, size_t bytes) {
+                if(!ec) self->on_read(ec, bytes);
+            });
+    }
+
+    void on_read(beast::error_code ec, size_t bytes_transferred) {
+        if(ec == http::error::end_of_stream) return do_close();
+        if(ec) {
+            std::cerr << "Read error: " << ec.message() << std::endl;
+            return;
+        }
+        handle_request();
+    }
+
+    // std::string create_json_response(const vector<User>& user_list)
+    // {
+    //     rapidjson::Document doc;
+    //     doc.SetArray();
+    //     rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+
+    //     for(const auto& user : user_list)
+    //     {
+    //         rapidjson::Value user_obj(rapidjson::kObjectType);
+    //         user_obj.AddMember("id", user.id, allocator);
+            
+    //         rapidjson::Value name_val;
+    //         name_val.SetString(user.name.c_str(), user.name.length(), allocator);
+    //         user_obj.AddMember("name", name_val, allocator);
+            
+    //         rapidjson::Value email_val;
+    //         email_val.SetString(user.email.c_str(), user.email.length(), allocator);
+    //         user_obj.AddMember("email", email_val, allocator);
+            
+    //         doc.PushBack(user_obj, allocator);
+    //     }
+
+    //     rapidjson::StringBuffer buffer;
+    //     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    //     doc.Accept(writer);
+        
+    //     return buffer.GetString();
+    // }
+
+    // std::string create_single_user_json(const User& user)
+    // {
+    //     rapidjson::Document doc;
+    //     doc.SetObject();
+    //     rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+
+    //     doc.AddMember("id", user.id, allocator);
+        
+    //     rapidjson::Value name_val;
+    //     name_val.SetString(user.name.c_str(), user.name.length(), allocator);
+    //     doc.AddMember("name", name_val, allocator);
+        
+    //     rapidjson::Value email_val;
+    //     email_val.SetString(user.email.c_str(), user.email.length(), allocator);
+    //     doc.AddMember("email", email_val, allocator);
+
+    //     rapidjson::StringBuffer buffer;
+    //     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    //     doc.Accept(writer);
+        
+    //     return buffer.GetString();
+    // }
+
+    string create_error_json(const string& message) {
+        Document doc;
+        doc.SetObject();
+        Document::AllocatorType& allocator = doc.GetAllocator();
+
+        Value error_val;
+        error_val.SetString(message.c_str(), message.length(), allocator);
+        doc.AddMember("error", error_val, allocator);
+
+        StringBuffer buffer;
+        Writer<StringBuffer> writer(buffer);
+        doc.Accept(writer);
+        
+        return buffer.GetString();
+    }
+
+    void handle_request() {
+        if(req_.method() != http::verb::get) {
+            http::response<http::string_body> res{http::status::method_not_allowed, req_.version()};
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, "application/json");
+            res.keep_alive(req_.keep_alive());
+            res.body() = create_error_json("Only GET requests are supported");
+            res.prepare_payload();
+            return send_response(move(res));
+        }
+
+        string target = string(req_.target());
+
+        http::response<http::string_body> res{http::status::ok, req_.version()};
+        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        res.set(http::field::content_type, "application/json");
+        res.keep_alive(req_.keep_alive());
+
+        // if(target == "/api/users") {
+        //     // GET /api/users - Get all users
+        //     res.body() = create_json_response(users);
+        // }
+        // else if(target.starts_with("/api/users/"))
+        // {
+        //     // GET /api/users/{id} - Get specific user
+        //     try {
+        //         string id_str = target.substr(11); // Remove "/api/users/"
+        //         int id = stoi(id_str);
+                
+        //         auto it = find_if(users.begin(), users.end(), 
+        //                              [id](const User& u) { return u.id == id; });
+                
+        //         if(it != users.end())
+        //         {
+        //             res.body() = create_single_user_json(*it);
+        //         }
+        //         else
+        //         {
+        //             res.result(http::status::not_found);
+        //             res.body() = create_error_json("User not found");
+        //         }
+        //     } catch(const exception& e) {
+        //         res.result(http::status::bad_request);
+        //         res.body() = create_error_json("Invalid user ID");
+        //     }
+        // } else 
+        if(target == "/api/health") {
+            // Health check endpoint
+            rapidjson::Document doc;
+            doc.SetObject();
+            rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+            
+            rapidjson::Value status_val;
+            status_val.SetString("healthy", allocator);
+            doc.AddMember("status", status_val, allocator);
+            doc.AddMember("timestamp", time(nullptr), allocator);
+
+            rapidjson::StringBuffer buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+            doc.Accept(writer);
+            
+            res.body() = buffer.GetString();
+        } else {
+            res.result(http::status::not_found);
+            res.body() = create_error_json("Endpoint not found");
+        }
+
+        res.prepare_payload();
+        send_response(move(res));
+    }
+
+    void send_response(http::response<http::string_body>&& res) {
+        auto sp = make_shared<http::response<http::string_body>>(move(res));
+        
+        http::async_write(stream_, *sp,
+            [self = shared_from_this(), sp](beast::error_code ec, size_t bytes) {
+                if(!ec && !sp->need_eof()) {
+                    self->do_read();
+                } else {
+                    self->do_close();
+                }
+            });
+    }
+
+    void do_close() {
+        beast::error_code ec;
+        stream_.socket().shutdown(tcp::socket::shutdown_send, ec);
+    }
+};
+
+class Listener : public enable_shared_from_this<Listener> {
+    net::io_context& ioc_;
+    tcp::acceptor acceptor_;
+
+public:
+    Listener(net::io_context& ioc, tcp::endpoint endpoint) : ioc_(ioc), acceptor_(ioc) {
+        beast::error_code ec;
+        acceptor_.open(endpoint.protocol(), ec);
+        if(ec) {
+            cerr << "Open error: " << ec.message() << endl;
+            return;
+        }
+
+        acceptor_.set_option(net::socket_base::reuse_address(true), ec);
+        if(ec) {
+            cerr << "Set option error: " << ec.message() << endl;
+            return;
+        }
+
+        acceptor_.bind(endpoint, ec);
+        if(ec) {
+            cerr << "Bind error: " << ec.message() << endl;
+            return;
+        }
+
+        acceptor_.listen(net::socket_base::max_listen_connections, ec);
+        if(ec) {
+            cerr << "Listen error: " << ec.message() << endl;
+            return;
+        }
+    }
+
+    void run() {
+        do_accept();
+    }
+
+private:
+    void do_accept() {
+        acceptor_.async_accept(
+            [self = shared_from_this()](beast::error_code ec, tcp::socket socket) {
+                if(!ec) {
+                    make_shared<HttpSession>(move(socket))->run();
+                } else {
+                    cerr << "Accept error: " << ec.message() << endl;
+                }
+                
+                self->do_accept();
+            });
+    }
+};
+
+void startBoostServer(unsigned short port) {
+    auto const address = net::ip::make_address("0.0.0.0");
+    net::io_context ioc{max<int>(1, thread::hardware_concurrency())};
+    make_shared<Listener>(ioc, tcp::endpoint{address, port})->run();
+
+    cout << "ESeMan web server running on http://" << address << ":" << port << endl;
+    cout << "Available endpoints (GET only):" << endl;
+    cout << "  GET /api/health" << endl;
+    cout << "  GET /api/users" << endl;
+    cout << "  GET /api/users/{id}" << endl;
+
+    // Graceful shutdown on SIGINT/SIGTERM
+    net::signal_set signals(ioc, SIGINT, SIGTERM);
+    signals.async_wait([&](beast::error_code const&, int){ ioc.stop(); });
+
+    // Run the I/O service on a thread pool
+    vector<thread> threads;
+    auto n = max(2u, thread::hardware_concurrency());
+    threads.reserve(n - 1);
+    for (unsigned i = 0; i < n - 1; ++i) threads.emplace_back([&]{ ioc.run(); });
+    ioc.run();
+    for (auto& t : threads) t.join();
+}
+
 int main(int argc, char* argv[]) {
     unordered_map<string, string> args;
     args["port"] = "8080"; // Default port
@@ -336,6 +606,20 @@ int main(int argc, char* argv[]) {
             agglomerateClusters->buildAllAggClusters();
         } else {
             esemanKDT->buildKDT();
+        }
+    }
+
+    if(args.find("start") != args.end()) {
+        if(eseman_model == ESEMAN_MODELS::AGC) {
+            startBoostServer(stoi(args["port"]));
+        } else {
+            esemanKDT->openReadOnlyLMDB();
+            if(esemanKDT->reloadNodesFromFile(true)) {    
+                startBoostServer(stoi(args["port"]));
+                esemanKDT->closeReadOnlyLMDB();
+            } else {
+                cout << "ESEMAN dataset not found on disk" << endl;
+            }
         }
     }
 
