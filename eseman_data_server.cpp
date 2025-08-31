@@ -427,6 +427,11 @@ private:
             http::response<http::string_body> res{http::status::method_not_allowed, req_.version()};
             res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
             res.set(http::field::content_type, "application/json");
+
+            res.set(http::field::access_control_allow_origin, "*");
+            res.set(http::field::access_control_allow_headers, "Content-Type");
+            res.set(http::field::access_control_allow_methods, "GET, OPTIONS");
+
             res.keep_alive(req_.keep_alive());
             res.body() = create_error_json("Only GET requests are supported");
             res.prepare_payload();
@@ -440,6 +445,9 @@ private:
         http::response<http::string_body> res{http::status::ok, req_.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "application/json");
+        res.set(http::field::access_control_allow_origin, "*");
+        res.set(http::field::access_control_allow_headers, "Content-Type");
+        res.set(http::field::access_control_allow_methods, "GET, OPTIONS");
         res.keep_alive(req_.keep_alive());
 
         string params_valid_string = check_param_validity(path, query_params);
