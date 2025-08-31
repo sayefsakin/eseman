@@ -387,7 +387,7 @@ int main() {
 
     // agglomerate_clustering.addPrimitiveFilter("second");
     // agglomerate_clustering.addIDFilter("320000");
-    LocDict results = agglomerate_clustering.binnedRangeQuery(-1305029698, 2753780939, 9, 9, 10);
+    LocDict results = agglomerate_clustering.binnedRangeQuery(-1305029698, 2753780939, 9, 9);
     PRINTLOG("Results: ");
     for(const auto& [loc, values] : results) {
       cout << "Location: " << loc << " Values: ";

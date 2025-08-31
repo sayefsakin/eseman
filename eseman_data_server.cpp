@@ -1,22 +1,4 @@
 #include "eseman_data_server.h"
-#include <iomanip>
-#include <filesystem>
-
-using namespace rapidjson;
-using namespace std;
-
-namespace beast = boost::beast;
-namespace http = beast::http;
-namespace net = boost::asio;
-using tcp = boost::asio::ip::tcp;
-
-//TODO: dynamically tune the buffer size for larger files to improve I/O performance
-#define DEFAULT_READ_BUFFER_SIZE 256*1024 // 256KB
-
-// short name, long name, argument name, default value, description
-typedef vector<tuple <string, string, string, string, string> > CMD_OPTIONS;
-
-enum class ESEMAN_MODELS { AGC, KDT, ODKDT };
 
 class ESeManJSONHandler : public BaseReaderHandler<UTF8<>, ESeManJSONHandler> {
 public:
@@ -110,7 +92,7 @@ void printHelp(const char* progName, const CMD_OPTIONS& options) {
     cout << endl;
 }
 
-int process_input_arguments(int argc, char* argv[], unordered_map<string, string>& args) {
+int process_input_arguments(int argc, char* argv[], STRING_DICT& args) {
     CMD_OPTIONS options = {
         {"-h", "--help",    "",         "",     "Show this help message."},
         {"-s", "--start",   "",         "",     "Start the server."},
@@ -203,6 +185,119 @@ int process_input_arguments(int argc, char* argv[], unordered_map<string, string
     return 0;
 }
 
+
+Document agcGetAttributeQuery(uint64_t cTime, uint64_t cLocation) {
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    string new_result = agglomerateClusters->findNearestEvent(cTime, cLocation);
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+    cout << "AGC," << "ds_attribute," 
+        << cTime << "," << cLocation << "," 
+        << agglomerateClusters->horizontal_resolution_divisor << ","
+        << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() 
+        << endl;
+
+    Document document;
+    document.SetObject();
+    Document::AllocatorType& allocator = document.GetAllocator();
+    if(new_result.length()>0) {
+        Value val(kObjectType);
+        val.SetString(new_result.c_str(), static_cast<SizeType>(new_result.length()), allocator);
+        document.AddMember("event_id", val, allocator);
+    }
+    return document;
+}
+
+Document esemanGetAttributeQuery(uint64_t cTime, uint64_t cLocation) {
+    std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
+    string new_result = esemanKDT->findNearestEvent(cTime, cLocation);
+    std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
+    if(!new_result.empty())
+        cout << "ESEMAN," << "ds_attribute," 
+            << cTime << "," << cLocation << ","
+            << esemanKDT->horizontal_resolution_divisor << ","
+            << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()
+            << endl;
+
+    Document document;
+    document.SetObject();
+    Document::AllocatorType& allocator = document.GetAllocator();
+    if(new_result.length()>0) {
+        Value val(kObjectType);
+        val.SetString(new_result.c_str(), static_cast<SizeType>(new_result.length()), allocator);
+        document.AddMember("event_id", val, allocator);
+    }
+    return document;
+}
+
+Document convertLocDictToDocument(LocDict locDict) {
+    Document document;
+    document.SetObject();
+    Document::AllocatorType& allocator = document.GetAllocator();
+    for ( const auto &myPair : locDict ) {
+        Value a(kArrayType);
+        uint64_t bins = myPair.second.size();
+        for(uint64_t c_bin = 0; c_bin < bins; c_bin++) {
+            Value val(kObjectType);
+            string d_string = to_string(myPair.second[c_bin]);
+            val.SetString(d_string.c_str(), static_cast<SizeType>(d_string.length()), allocator);
+            a.PushBack(val, allocator);
+        }
+        Value lval(kObjectType);
+        string loc_string = to_string(myPair.first);
+        lval.SetString(loc_string.c_str(), static_cast<SizeType>(loc_string.length()), allocator);
+        document.AddMember(lval, a, allocator);
+    }
+    return document;
+}
+
+Document binnedAGCSearchQuery(
+    int64_t time_begin,
+    int64_t time_end,
+    vector<string> &locations,
+    uint64_t bins, string primitive) {
+
+    if(primitive.length()>0) {
+        agglomerateClusters->addPrimitiveFilter(primitive);
+    }
+    LocDict lResults = agglomerateClusters->binnedRangeQuery(time_begin, time_end, locations, bins);
+    Document d = convertLocDictToDocument(lResults);
+    lResults.clear();
+    return d;
+}
+
+void print_available_endpoints(string address, unsigned short port) {
+    cout << "ESeMan web server running on http://" << address << ":" << port << endl;
+    cout << "Available endpoints (GET only):" << endl;
+    for (const auto& [endpoint, params] : get_params) {
+        cout << "  GET /" << endpoint << "?";
+
+        bool first = true;
+        for (const auto& [param_name, is_string, is_required] : params) {
+            if (!first) cout << "&";
+            first = false;
+            cout << endl << right << setw(30) << param_name << "="
+                    << (is_string ? "(string)" : "(integer)") 
+                    << (is_required ? "[required]" : "");
+        }
+        cout << endl;
+    }
+}
+
+Document binnedESEMANSearchQuery(
+    int64_t time_begin,
+    int64_t time_end,
+    vector<string> &locations,
+    uint64_t bins, string primitive) {
+
+    if(primitive.length()>0) {
+        esemanKDT->addPrimitiveFilter(primitive);
+    }
+    LocDict lResults = esemanKDT->binnedRangeQuery(time_begin, time_end, locations, bins);
+    Document d = convertLocDictToDocument(lResults);
+    lResults.clear();
+    return d;
+}
 class HttpSession : public enable_shared_from_this<HttpSession> {
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
@@ -216,6 +311,82 @@ public:
     }
 
 private:
+    STRING_DICT parse_query_params(const string& target) {
+        STRING_DICT params;
+        
+        size_t query_pos = target.find('?');
+        if(query_pos == string::npos)
+            return params;
+        
+        string query = target.substr(query_pos + 1);
+        istringstream iss(query);
+        string pair;
+        
+        while(getline(iss, pair, '&')) {
+            size_t eq_pos = pair.find('=');
+            if(eq_pos != string::npos) {
+                string key = url_decode(pair.substr(0, eq_pos));
+                string value = url_decode(pair.substr(eq_pos + 1));
+                params[key] = value;
+            }
+        }
+        
+        return params;
+    }
+
+    string check_param_validity(const string& path, const STRING_DICT& params) {
+        // Remove leading slash if present
+        string key = path;
+        if (!key.empty() && key[0] == '/') key = key.substr(1);
+
+        // Only check for known endpoints
+        if (get_params.find(key) == get_params.end())
+            return "Bad request: Unknown endpoint";
+
+        const auto& param_specs = get_params.at(key);
+        for (const auto& [param_name, is_string, is_required] : param_specs) {
+            auto it = params.find(param_name);
+            if (is_required && (it == params.end() || it->second.empty())) {
+                return "Missing required parameter: " + param_name;
+            }
+            if (!is_string && it != params.end() && !it->second.empty()) {
+                try {
+                    stoll(it->second);
+                } catch (...) {
+                    return "Parameter '" + param_name + "' must be an integer";
+                }
+            }
+        }
+        return "OK";
+    }
+    
+    string url_decode(const string& str) {
+        string result;
+        for(size_t i = 0; i < str.length(); ++i) {
+            if(str[i] == '%' && i + 2 < str.length()) {
+                int value;
+                istringstream iss(str.substr(i + 1, 2));
+                if(iss >> hex >> value) {
+                    result += static_cast<char>(value);
+                    i += 2;
+                } else {
+                    result += str[i];
+                }
+            }
+            else if(str[i] == '+') {
+                result += ' ';
+            } else {
+                result += str[i];
+            }
+        }
+        return result;
+    }
+    
+    string get_path_without_query(const string& target) {
+        size_t query_pos = target.find('?');
+        return query_pos == string::npos ? target : target.substr(0, query_pos);
+    }
+
     void do_read() {
         req_ = {};
         stream_.expires_after(chrono::seconds(30));
@@ -234,58 +405,6 @@ private:
         }
         handle_request();
     }
-
-    // std::string create_json_response(const vector<User>& user_list)
-    // {
-    //     rapidjson::Document doc;
-    //     doc.SetArray();
-    //     rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
-
-    //     for(const auto& user : user_list)
-    //     {
-    //         rapidjson::Value user_obj(rapidjson::kObjectType);
-    //         user_obj.AddMember("id", user.id, allocator);
-            
-    //         rapidjson::Value name_val;
-    //         name_val.SetString(user.name.c_str(), user.name.length(), allocator);
-    //         user_obj.AddMember("name", name_val, allocator);
-            
-    //         rapidjson::Value email_val;
-    //         email_val.SetString(user.email.c_str(), user.email.length(), allocator);
-    //         user_obj.AddMember("email", email_val, allocator);
-            
-    //         doc.PushBack(user_obj, allocator);
-    //     }
-
-    //     rapidjson::StringBuffer buffer;
-    //     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    //     doc.Accept(writer);
-        
-    //     return buffer.GetString();
-    // }
-
-    // std::string create_single_user_json(const User& user)
-    // {
-    //     rapidjson::Document doc;
-    //     doc.SetObject();
-    //     rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
-
-    //     doc.AddMember("id", user.id, allocator);
-        
-    //     rapidjson::Value name_val;
-    //     name_val.SetString(user.name.c_str(), user.name.length(), allocator);
-    //     doc.AddMember("name", name_val, allocator);
-        
-    //     rapidjson::Value email_val;
-    //     email_val.SetString(user.email.c_str(), user.email.length(), allocator);
-    //     doc.AddMember("email", email_val, allocator);
-
-    //     rapidjson::StringBuffer buffer;
-    //     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
-    //     doc.Accept(writer);
-        
-    //     return buffer.GetString();
-    // }
 
     string create_error_json(const string& message) {
         Document doc;
@@ -315,53 +434,87 @@ private:
         }
 
         string target = string(req_.target());
+        string path = get_path_without_query(target);
+        STRING_DICT query_params = parse_query_params(target);
 
         http::response<http::string_body> res{http::status::ok, req_.version()};
         res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
         res.set(http::field::content_type, "application/json");
         res.keep_alive(req_.keep_alive());
 
-        // if(target == "/api/users") {
-        //     // GET /api/users - Get all users
-        //     res.body() = create_json_response(users);
-        // }
-        // else if(target.starts_with("/api/users/"))
-        // {
-        //     // GET /api/users/{id} - Get specific user
-        //     try {
-        //         string id_str = target.substr(11); // Remove "/api/users/"
-        //         int id = stoi(id_str);
-                
-        //         auto it = find_if(users.begin(), users.end(), 
-        //                              [id](const User& u) { return u.id == id; });
-                
-        //         if(it != users.end())
-        //         {
-        //             res.body() = create_single_user_json(*it);
-        //         }
-        //         else
-        //         {
-        //             res.result(http::status::not_found);
-        //             res.body() = create_error_json("User not found");
-        //         }
-        //     } catch(const exception& e) {
-        //         res.result(http::status::bad_request);
-        //         res.body() = create_error_json("Invalid user ID");
-        //     }
-        // } else 
-        if(target == "/api/health") {
+        string params_valid_string = check_param_validity(path, query_params);
+        if(params_valid_string != "OK") {
+            res.result(http::status::bad_request);
+            res.body() = create_error_json(params_valid_string);
+        }
+        else if (boost::starts_with(target, "/get-data-in-range")) {
+            int64_t time_begin = stoll(query_params["begin"]);
+            int64_t time_end = stoll(query_params["end"]);
+            uint64_t bins = 1;
+            vector<string> locationsList;
+            string primitive("");
+            if(query_params.find("tracks") != query_params.end() && !query_params["tracks"].empty()) {
+                // Split by comma
+                istringstream iss(query_params["tracks"]);
+                string loc;
+                while (getline(iss, loc, ',')) {
+                    locationsList.push_back(loc);
+                }
+            }
+            if(query_params.find("bins") != query_params.end() && !query_params["bins"].empty()) {
+                bins = stoul(query_params["bins"]);
+            }
+            if(query_params.find("primitive") != query_params.end() && !query_params["primitive"].empty()) {
+                primitive = query_params["primitive"];
+            }
+
+            StringBuffer buffer;
+            Writer<StringBuffer> writer(buffer);
+
+            if(eseman_model == ESEMAN_MODELS::AGC && agglomerateClusters != nullptr) {
+                Document doc = binnedAGCSearchQuery(time_begin, time_end, locationsList, bins, primitive);
+                doc.Accept(writer);
+                res.body() = buffer.GetString();
+            } else if(esemanKDT != nullptr) {
+                Document doc = binnedESEMANSearchQuery(time_begin, time_end, locationsList, bins, primitive);
+                doc.Accept(writer);
+                res.body() = buffer.GetString();
+            } else {
+                res.result(http::status::internal_server_error);
+                res.body() = create_error_json("Data structure not initialized");
+            }
+        }
+        else if (boost::starts_with(target, "/get-event-attribute")) {
+
+            uint64_t cTime = stoll(query_params["current-time"]);
+            uint64_t cLocation = stoll(query_params["current-track"]);
+
+            StringBuffer buffer;
+            Writer<StringBuffer> writer(buffer);
+
+            if(eseman_model == ESEMAN_MODELS::AGC) {
+                Document doc = agcGetAttributeQuery(cTime, cLocation);
+                doc.Accept(writer);
+                res.body() = buffer.GetString();    
+            } else {
+                Document doc = esemanGetAttributeQuery(cTime, cLocation);
+                doc.Accept(writer);
+                res.body() = buffer.GetString();
+            }
+        }
+        else if(target == "/health") {
             // Health check endpoint
-            rapidjson::Document doc;
+            Document doc;
             doc.SetObject();
-            rapidjson::Document::AllocatorType& allocator = doc.GetAllocator();
+            Document::AllocatorType& allocator = doc.GetAllocator();
             
-            rapidjson::Value status_val;
+            Value status_val;
             status_val.SetString("healthy", allocator);
             doc.AddMember("status", status_val, allocator);
             doc.AddMember("timestamp", time(nullptr), allocator);
 
-            rapidjson::StringBuffer buffer;
-            rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+            StringBuffer buffer;
+            Writer<StringBuffer> writer(buffer);
             doc.Accept(writer);
             
             res.body() = buffer.GetString();
@@ -445,19 +598,19 @@ private:
 };
 
 void startBoostServer(unsigned short port) {
-    auto const address = net::ip::make_address("0.0.0.0");
+    string address_str = "127.0.0.1";
+    auto const address = net::ip::make_address(address_str);
     net::io_context ioc{max<int>(1, thread::hardware_concurrency())};
     make_shared<Listener>(ioc, tcp::endpoint{address, port})->run();
-
-    cout << "ESeMan web server running on http://" << address << ":" << port << endl;
-    cout << "Available endpoints (GET only):" << endl;
-    cout << "  GET /api/health" << endl;
-    cout << "  GET /api/users" << endl;
-    cout << "  GET /api/users/{id}" << endl;
+    print_available_endpoints(address_str, port);
 
     // Graceful shutdown on SIGINT/SIGTERM
     net::signal_set signals(ioc, SIGINT, SIGTERM);
-    signals.async_wait([&](beast::error_code const&, int){ ioc.stop(); });
+    signals.async_wait([&](beast::error_code const&, int){ 
+        cout << "Shutting down the ESeMan server." << endl;
+        if(esemanKDT != nullptr) esemanKDT->closeReadOnlyLMDB();
+        ioc.stop(); 
+    });
 
     // Run the I/O service on a thread pool
     vector<thread> threads;
@@ -469,10 +622,8 @@ void startBoostServer(unsigned short port) {
 }
 
 int main(int argc, char* argv[]) {
-    unordered_map<string, string> args;
-    args["port"] = "8080"; // Default port
-    AgglomerateClusters *agglomerateClusters = nullptr;
-    EseManKDT *esemanKDT = nullptr;
+    STRING_DICT args;
+    args["port"] = "8080";
 
     int c = process_input_arguments(argc, argv, args);
     if (c != 0) {
@@ -486,7 +637,6 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    ESEMAN_MODELS eseman_model = ESEMAN_MODELS::KDT;
     if (args.find("model") != args.end() && args["model"] == string("AGC")) {
         eseman_model = ESEMAN_MODELS::AGC;
     } else if (args.find("model") != args.end() && args["model"] == string("ODKDT")) {
@@ -563,7 +713,7 @@ int main(int argc, char* argv[]) {
         Reader reader;
         ESeManJSONHandler handler;
 
-        handler.onObject = [esemanKDT, agglomerateClusters](const std::string& jsonStr) {
+        handler.onObject = [](const std::string& jsonStr) {
             // Remove trailing comma if present
             std::string cleaned = jsonStr;
             if (!cleaned.empty() && cleaned.back() == ',')
@@ -616,7 +766,6 @@ int main(int argc, char* argv[]) {
             esemanKDT->openReadOnlyLMDB();
             if(esemanKDT->reloadNodesFromFile(true)) {    
                 startBoostServer(stoi(args["port"]));
-                esemanKDT->closeReadOnlyLMDB();
             } else {
                 cout << "ESEMAN dataset not found on disk" << endl;
             }
