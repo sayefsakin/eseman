@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vega Gantt Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; }
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; }
+    header .title { font-weight: 600; }
+    header .controls { display: flex; gap: 8px; align-items: center; }
+    #vis { height: calc(100vh - 56px); }
+    .pill { padding: 6px 10px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fafafa; }
+    input, button, select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 8px; }
+    button { cursor: pointer; }
+    button.primary { background: #111827; color: white; border-color: #111827; }
+    small.muted { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">Vega Gantt Viewer <small class="muted">(pan + zoom on both axes)</small></div>
+      <div class="controls">
+        <label>Tracks
+          <input id="tracksInput" value="2,3" title="Comma-separated track IDs (categorical labels on Y)">
+        </label>
+        <label>Begin
+          <input id="beginInput" value="1307411956" size="14" title="Inclusive start timestamp (integer)">
+        </label>
+        <label>End
+          <input id="endInput" value="1445679055" size="14" title="Exclusive end timestamp (integer)">
+        </label>
+        <button id="reloadBtn" class="primary">Reload</button>
+      </div>
+    </header>
+    <div id="vis"></div>
+  </div>
+
+  <script>
+  // ======= Config (adjust to your backend) =======
+  const API_BASE = 'http://127.0.0.1:8080/get-data-in-range'; // e.g., '/get-data-in-range'
+
+  // You can programmatically set initial extent here if your backend exposes it.
+  // On first render we request bins ~= visible pixels of the chart width.
+
+  // ======= Utilities =======
+  function debounce(fn, wait) {
+    let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), wait); };
+  }
+
+  function tracksFromInput() {
+    return document.getElementById('tracksInput').value.split(',').map(s => s.trim()).filter(Boolean);
+  }
+
+  function extentFromInputs() {
+    const b = parseInt(document.getElementById('beginInput').value, 10);
+    const e = parseInt(document.getElementById('endInput').value, 10);
+    return [b, e];
+  }
+
+  function computeBinsForWidth(pxWidth) {
+    // Use at most 1 bar per pixel for crisp rendering, and at least 10 to avoid empty view
+    return Math.max(10, Math.floor(pxWidth));
+  }
+
+  function transformApiResponseToRects(json, begin, end, trackList) {
+    const bins = Object.values(json)[0]?.length || 0;
+    const w = (end - begin) / bins;
+    const rects = [];
+    for (let tIdx = 0; tIdx < trackList.length; tIdx++) {
+      const track = trackList[tIdx];
+      const arr = json[track];
+      if (!arr) continue;
+      for (let i = 0; i < arr.length; i++) {
+        const v = parseFloat(arr[i]);
+        if (v <= 0) continue; // no bar for zero
+        const x0 = begin + i * w;
+        const x1 = begin + (i + 1) * w;
+        rects.push({
+          track, tIndex: tIdx, // for continuous Y pan/zoom
+          y0: tIdx, y1: tIdx + 1, // band as [index, index+1]
+          x0, x1,
+          value: v,
+          color: (v === 1.0) ? '#000000' : '#9ca3af' // black for 1.0, gray otherwise
+        });
+      }
+    }
+    return rects;
+  }
+
+  // ======= Vega Spec (continuous Y with categorical labels via axis labelExpr) =======
+  function makeSpec(width, height, trackLabels, begin, end) {
+    return {
+      $schema: 'https://vega.github.io/schema/vega/v5.json',
+      description: 'Zoomable/Pannable Gantt-by-bins',
+      width, height,
+      padding: 10,
+      signals: [
+        { name: 'trackLabels', value: trackLabels },
+        { name: 'xDomain', value: [begin, end], on: [
+          { events: 'mousemove![down], touchmove![down]', update: 'down ? span(xDomain) == 0 ? xDomain : panLinear(anchorX, span(xDomain), pan[0]) : xDomain' },
+          { events: 'wheel!', update: 'zoomLinear(domain("x"), invert("x", x()), pow(1.001, event.deltaY))', force: true }
+        ] },
+        { name: 'yDomain', value: [0, Math.max(1, trackLabels.length)], on: [
+          { events: 'mousemove![down], touchmove![down]', update: 'down ? span(yDomain) == 0 ? yDomain : panLinear(anchorY, span(yDomain), pan[1]) : yDomain' },
+          { events: 'wheel![event.shiftKey]', update: 'zoomLinear(domain("y"), invert("y", y()), pow(1.001, event.deltaY))', force: true }
+        ] },
+
+        // Drag panning (both axes)
+        { name: 'down', on: [ { events: 'mousedown,touchstart', update: 'xy()' } ] },
+        { name: 'anchorX', on: [ { events: 'mousedown,touchstart', update: 'invert("x", x())' } ] },
+        { name: 'anchorY', on: [ { events: 'mousedown,touchstart', update: 'invert("y", y())' } ] },
+        { name: 'pan', on: [
+          { events: 'mousemove![down], touchmove![down]', update: 'down ? [x() - down[0], y() - down[1]] : [0,0]' }
+        ] }
+      ],
+      data: [ { name: 'gantt' } ],
+      scales: [
+        { name: 'x', type: 'utc', domain: { signal: 'xDomain' }, range: 'width', nice: false, clamp: false },
+        { name: 'y', type: 'linear', domain: { signal: 'yDomain' }, range: 'height', nice: false, clamp: true, zero: false }
+      ],
+      axes: [
+        { orient: 'bottom', scale: 'x', format: '%s', grid: true},
+        { orient: 'left', scale: 'y', grid: true, tickMinStep: 1, values: { signal: 'sequence(floor(yDomain[0]), ceil(yDomain[1]), 1)' },
+          labelExpr: 'trackLabels[floor(datum.value)] !== undefined ? trackLabels[floor(datum.value)] : ""' }
+      ],
+      marks: [
+        {
+          type: 'rect',
+          from: { data: 'gantt' },
+          encode: {
+            enter: {
+              fill: { field: 'color' }
+            },
+            update: {
+              x: { scale: 'x', field: 'x0' },
+              x2: { scale: 'x', field: 'x1' },
+              y: { scale: 'y', field: 'y0' },
+              y2: { scale: 'y', field: 'y1' }
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  // Helper expressions for pan/zoom on linear scales
+  // Implemented as signal functions via expressionFunc in the View (below)
+
+  // ======= App logic =======
+  let view = null;
+  let currentSpec = null;
+
+  async function fetchAndRender(begin, end, trackList, bins) {
+    const visEl = document.getElementById('vis');
+    const { width, height } = visEl.getBoundingClientRect();
+    const binsToUse = bins || computeBinsForWidth(width);
+
+    const url = `${API_BASE}?bins=${binsToUse}&begin=${Math.floor(begin)}&end=${Math.floor(end)}&tracks=${encodeURIComponent(trackList.join(','))}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`API error ${resp.status}`);
+    const json = await resp.json();
+
+    const rects = transformApiResponseToRects(json, begin, end, trackList);
+
+    const spec = makeSpec(Math.max(300, Math.floor(width)), Math.max(240, Math.floor(height)), trackList, begin, end);
+
+    if (!view) {
+      const embedResult = await vegaEmbed('#vis', spec, { renderer: 'canvas', actions: false });
+      view = embedResult.view;
+
+      // Provide helper functions for signals
+      view.expressionFunction('span', (d) => d[1] - d[0]);
+      view.expressionFunction('panLinear', (anchor, span, deltaPx) => {
+        // Convert pixel delta into domain delta using scale
+        const x0 = view.scale('x')(anchor);
+        const x1 = x0 + deltaPx;
+        const inv0 = view.scale('x').invert(x0);
+        const inv1 = view.scale('x').invert(x1);
+        const delta = inv1 - inv0;
+        return [anchor - (anchor - view.signal('xDomain')[0]) - delta, anchor + (view.signal('xDomain')[1] - anchor) - delta];
+      });
+      view.expressionFunction('zoomLinear', (domain, anchor, zoomFactor) => {
+        const [d0, d1] = domain;
+        const span = d1 - d0;
+        const a = +anchor;
+        const newSpan = span * zoomFactor;
+        const t = (a - d0) / span;
+        const nd0 = a - t * newSpan;
+        const nd1 = nd0 + newSpan;
+        return [nd0, nd1];
+      });
+
+      // When xDomain changes (zoom/pan), refetch bins ~= pixels for crispness
+      const refetchOnX = debounce(async () => {
+        const xDom = view.signal('xDomain');
+        const tracks = tracksFromInput();
+        const { width } = document.getElementById('vis').getBoundingClientRect();
+        const binsNow = computeBinsForWidth(width);
+        await fetchAndInject(xDom[0], xDom[1], tracks, binsNow);
+      }, 250);
+
+      view.addSignalListener('xDomain', refetchOnX);
+    } else {
+      await view.finalize();
+      const embedResult = await vegaEmbed('#vis', spec, { renderer: 'canvas', actions: false });
+      view = embedResult.view;
+    }
+
+    await fetchAndInject(begin, end, trackList, binsToUse);
+  }
+
+  async function fetchAndInject(begin, end, trackList, bins) {
+    const url = `${API_BASE}?bins=${bins}&begin=${Math.floor(begin)}&end=${Math.floor(end)}&tracks=${encodeURIComponent(trackList.join(','))}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`API error ${resp.status}`);
+    const json = await resp.json();
+    const rects = transformApiResponseToRects(json, begin, end, trackList);
+
+    const cs = vega.changeset().remove(() => true).insert(rects);
+    view.change('gantt', cs).runAsync();
+  }
+
+  // Initial load
+  async function init() {
+    const [begin, end] = extentFromInputs();
+    const trackList = tracksFromInput();
+    // bins ~= visible pixels
+    const { width } = document.getElementById('vis').getBoundingClientRect();
+    const bins = computeBinsForWidth(width);
+    await fetchAndRender(begin, end, trackList, bins);
+  }
+
+  // UI hooks
+  document.getElementById('reloadBtn').addEventListener('click', () => {
+    const [begin, end] = extentFromInputs();
+    const tracks = tracksFromInput();
+    const { width } = document.getElementById('vis').getBoundingClientRect();
+    const bins = computeBinsForWidth(width);
+    fetchAndRender(begin, end, tracks, bins).catch(err => console.error(err));
+  });
+
+  window.addEventListener('resize', debounce(() => {
+    const [begin, end] = extentFromInputs();
+    const tracks = tracksFromInput();
+    const { width } = document.getElementById('vis').getBoundingClientRect();
+    const bins = computeBinsForWidth(width);
+    fetchAndRender(begin, end, tracks, bins).catch(err => console.error(err));
+  }, 200));
+
+  init().catch(err => {
+    console.error(err);
+    alert('Failed to initialize visualization. Check console for details.');
+  });
+  </script>
+</body>
+</html>

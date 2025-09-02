@@ -234,20 +234,30 @@ Document convertLocDictToDocument(LocDict locDict) {
     Document document;
     document.SetObject();
     Document::AllocatorType& allocator = document.GetAllocator();
-    for ( const auto &myPair : locDict ) {
-        Value a(kArrayType);
-        uint64_t bins = myPair.second.size();
-        for(uint64_t c_bin = 0; c_bin < bins; c_bin++) {
-            Value val(kObjectType);
-            string d_string = to_string(myPair.second[c_bin]);
-            val.SetString(d_string.c_str(), static_cast<SizeType>(d_string.length()), allocator);
-            a.PushBack(val, allocator);
-        }
-        Value lval(kObjectType);
+    Value tracks(kArrayType);
+    for (const auto& myPair : locDict) {
+        Value trackObj(kObjectType);
+
+        // "track" field
         string loc_string = to_string(myPair.first);
+        Value lval;
         lval.SetString(loc_string.c_str(), static_cast<SizeType>(loc_string.length()), allocator);
-        document.AddMember(lval, a, allocator);
+        trackObj.AddMember("track", lval, allocator);
+
+        // "utils" field (array)
+        Value utilsArr(kArrayType);
+        uint64_t bins = myPair.second.size();
+        for (uint64_t c_bin = 0; c_bin < bins; c_bin++) {
+            string d_string = to_string(myPair.second[c_bin]);
+            Value val;
+            val.SetString(d_string.c_str(), static_cast<SizeType>(d_string.length()), allocator);
+            utilsArr.PushBack(val, allocator);
+        }
+        trackObj.AddMember("utils", utilsArr, allocator);
+
+        tracks.PushBack(trackObj, allocator);
     }
+    document.AddMember("data", tracks, allocator);
     return document;
 }
 
@@ -293,9 +303,28 @@ Document binnedESEMANSearchQuery(
     if(primitive.length()>0) {
         esemanKDT->addPrimitiveFilter(primitive);
     }
-    LocDict lResults = esemanKDT->binnedRangeQuery(time_begin, time_end, locations, bins);
-    Document d = convertLocDictToDocument(lResults);
-    lResults.clear();
+    tuple<LocDict, int64_t, int64_t> lResults = esemanKDT->binnedRangeQuery(time_begin, time_end, locations, bins);
+    Document d = convertLocDictToDocument(get<0>(lResults));
+
+    Document metadata(kObjectType);
+    Document::AllocatorType& allocator = d.GetAllocator();
+
+    metadata.AddMember("begin", get<1>(lResults), allocator);
+    metadata.AddMember("end", get<2>(lResults), allocator);
+    metadata.AddMember("bins", static_cast<uint64_t>(bins), allocator);
+
+    // Value dataKey("data", allocator);
+    Value metadataKey("metadata", allocator);
+
+    // // Move the current document (d) under "data"
+    // Value dataValue(kObjectType);
+    // dataValue.CopyFrom(d, allocator);
+
+    // d.SetObject();
+    // d.AddMember(dataKey, dataValue, allocator);
+    d.AddMember(metadataKey, metadata, allocator);
+
+    get<0>(lResults).clear();
     return d;
 }
 class HttpSession : public enable_shared_from_this<HttpSession> {
@@ -456,11 +485,14 @@ private:
             res.body() = create_error_json(params_valid_string);
         }
         else if (boost::starts_with(target, "/get-data-in-range")) {
-            int64_t time_begin = stoll(query_params["begin"]);
-            int64_t time_end = stoll(query_params["end"]);
-            uint64_t bins = 1;
+            int64_t time_begin = -1;
+            if(query_params.find("begin") != query_params.end() && !query_params["begin"].empty())
+                time_begin = stoll(query_params["begin"]);
+            int64_t time_end = -1;
+            if(query_params.find("end") != query_params.end() && !query_params["end"].empty())
+                time_end = stoll(query_params["end"]);
+            
             vector<string> locationsList;
-            string primitive("");
             if(query_params.find("tracks") != query_params.end() && !query_params["tracks"].empty()) {
                 // Split by comma
                 istringstream iss(query_params["tracks"]);
@@ -469,9 +501,12 @@ private:
                     locationsList.push_back(loc);
                 }
             }
+
+            uint64_t bins = 100;
             if(query_params.find("bins") != query_params.end() && !query_params["bins"].empty()) {
                 bins = stoul(query_params["bins"]);
             }
+            string primitive("");
             if(query_params.find("primitive") != query_params.end() && !query_params["primitive"].empty()) {
                 primitive = query_params["primitive"];
             }

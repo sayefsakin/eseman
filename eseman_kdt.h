@@ -228,7 +228,7 @@ public:
     filters.clear();
   }
 
-  LocDict binnedRangeQuery(int64_t time_begin, int64_t time_end, 
+  tuple<LocDict, int64_t, int64_t> binnedRangeQuery(int64_t i_time_begin, int64_t i_time_end, 
                           vector<string> &locations,
                           uint64_t bins);
   string findNearestEvent(uint64_t cTime, uint64_t cLocation);

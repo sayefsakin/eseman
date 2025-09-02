@@ -47,8 +47,8 @@ ESEMAN_MODELS eseman_model = ESEMAN_MODELS::KDT;
 GET_PARAMS get_params = {
     {
         "get-data-in-range", { 
-              {"begin", false, true}
-            , {"end", false, true}
+              {"begin", false, false}
+            , {"end", false, false}
             , {"tracks", true, false}
             , {"bins", true, false}
             , {"primitive", true, false}

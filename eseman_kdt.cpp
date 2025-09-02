@@ -717,8 +717,8 @@ LocDict EseManKDT::binnedRangeQueryAllTracks(int64_t time_begin,
     return locDict;
 }
 
-LocDict EseManKDT::binnedRangeQuery(int64_t time_begin, 
-                                    int64_t time_end,
+tuple<LocDict, int64_t, int64_t> EseManKDT::binnedRangeQuery(int64_t i_time_begin, 
+                                    int64_t i_time_end,
                                     vector<string> &locations,
                                     uint64_t bins){
     LocDict locDict;
@@ -747,9 +747,34 @@ LocDict EseManKDT::binnedRangeQuery(int64_t time_begin,
         });
         size_t st_track = event_tracks.get_track_index(locations[0]);
         size_t en_track = event_tracks.get_track_index(locations[locations.size()-1]);
-        locDict = binnedRangeQueryAllTracks(time_begin, time_end, st_track, en_track, bins);
+        if (i_time_begin < 0) i_time_begin = (int64_t)(event_data_nodes[0]->start_time) - 10;
+        if (i_time_end < 0) i_time_end = (int64_t)(event_data_nodes[0]->end_time) + 10;
+        locDict = binnedRangeQueryAllTracks(i_time_begin, i_time_end, st_track, en_track, bins);
         PRINTLOG("From vertical split");
     } else {
+        if(locations.size() == 0) {
+            for(size_t i = 0; i < event_tracks.size(); i++) {
+                locations.push_back(event_tracks[i]);
+            }
+        }
+        if(i_time_begin < 0 || i_time_end < 0) {
+            int64_t global_start_time = std::numeric_limits<int64_t>::max();
+            int64_t global_end_time = 0;
+            for (const string& loc : locations) {
+                size_t track_index = event_tracks.get_track_index(loc);
+                if(track_index == event_tracks.size()) {
+                    PRINTLOG("Track not found in event tracks " << loc);
+                    continue;
+                }
+                if(event_data_nodes[track_index]) {
+                    global_start_time = std::min(global_start_time, (int64_t)event_data_nodes[track_index]->start_time);
+                    global_end_time = std::max(global_end_time, (int64_t)event_data_nodes[track_index]->end_time);
+                }
+            }
+            if(i_time_begin < 0) i_time_begin = global_start_time - 10;
+            if(i_time_end < 0) i_time_end = global_end_time + 10;
+        }
+
         for (const string& loc : locations) {
             size_t track_index = event_tracks.get_track_index(loc);
             if(track_index == event_tracks.size()) {
@@ -757,11 +782,11 @@ LocDict EseManKDT::binnedRangeQuery(int64_t time_begin,
                 continue;
             }
             nodes_visited = 0;
-            EsemanNode* t_node = checkHotNodes(time_begin, time_end, track_index);
+            EsemanNode* t_node = checkHotNodes(i_time_begin, i_time_end, track_index);
 #ifdef _DEBUG
             chrono::steady_clock::time_point track_clock_begin = chrono::steady_clock::now();
 #endif
-            locDict[stol(loc)] = binnedRangeQueryPerTrack(time_begin, time_end, track_index, bins, t_node);
+            locDict[stol(loc)] = binnedRangeQueryPerTrack(i_time_begin, i_time_end, track_index, bins, t_node);
 #ifdef _DEBUG
             chrono::steady_clock::time_point track_clock_end = chrono::steady_clock::now();
 #endif
@@ -780,11 +805,11 @@ LocDict EseManKDT::binnedRangeQuery(int64_t time_begin,
     }
     cout << profiled_ds << ",ds_window";
     if(filters.size() > 0) cout << "_cond";
-    cout << "," << time_begin << "," << time_end << "," 
+    cout << "," << i_time_begin << "," << i_time_end << "," 
         << horizontal_resolution_divisor << ","
         << chrono::duration_cast<chrono::microseconds>(clock_end - clock_begin).count()
         << endl;
-    return locDict;
+    return make_tuple(locDict, i_time_begin, i_time_end);
 }
 
 string EseManKDT::findNearestEvent(uint64_t cTime, uint64_t cLocation) {
@@ -1346,21 +1371,21 @@ EsemanNode* EseManKDT::findNodeInTimeRange(string uuid, double s_time, double e_
 void test_cases_for_memory_check(EseManKDT *kdt) {
     // exact same range
     cout << "=========== TESTING EXACT SAME RANGE =================" << endl;
-    vector<string> locations = {"2"};
-    // LocDict result = kdt->binnedRangeQuery(-1305029698, 2753780939, 
+    // vector<string> locations = {"2"};
+    // // LocDict result = kdt->binnedRangeQuery(-1305029698, 2753780939, 
+    // //                         locations,
+    // //                         100);
+    // LocDict result = kdt->binnedRangeQuery(1307411956, 1445679055,
     //                         locations,
-    //                         100);
-    LocDict result = kdt->binnedRangeQuery(1307411956, 1445679055,
-                            locations,
-                            10);
-    // Print LocDict result
-    for (const auto& [track_index, bins_vec] : result) {
-        cout << "Track: " << track_index << " -> ";
-        for (double val : bins_vec) {
-            cout << val << " ";
-        }
-        cout << endl;
-    }
+    //                         10);
+    // // Print LocDict result
+    // for (const auto& [track_index, bins_vec] : result) {
+    //     cout << "Track: " << track_index << " -> ";
+    //     for (double val : bins_vec) {
+    //         cout << val << " ";
+    //     }
+    //     cout << endl;
+    // }
     // kdt->binnedRangeQuery(-1305029698, 2753780939, 
     //                         locations,
     //                         4000);
