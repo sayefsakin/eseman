@@ -8,47 +8,6 @@
   
   "signals": [
     {
-      "name": "beginTime",
-      "value": 1307411956,
-      "description": "Start time (Unix timestamp)"
-    },
-    {
-      "name": "endTime", 
-      "value": 1445679055,
-      "description": "End time (Unix timestamp)"
-    },
-    {
-      "name": "yDomain",
-      "value": [0,2]
-    },
-    {
-      "name": "viewWidth",
-      "value": 800,
-      "description": "Visible width of chart area"
-    },
-    {
-      "name": "chartWidth",
-      "value": 1200,
-      "update": "baseChartWidth * zoomX",
-      "description": "Current chart width with zoom"
-    },
-    {
-      "name": "chartHeight",
-      "value": 600,
-      "update": "baseChartHeight * zoomY", 
-      "description": "Current chart height with zoom"
-    },
-    {
-      "name": "viewHeight", 
-      "value": 400,
-      "description": "Visible height of chart area"
-    },
-    {
-      "name": "tracks",
-      "value": "1,2,3,4,5,6,7,8",
-      "description": "Comma-separated track IDs"
-    },
-    {
       "name": "bins",
       "value": 1000,
       "description": "Number of bins "
@@ -57,10 +16,6 @@
       "name": "apiUrl",
       "value": "http://127.0.0.1:8080/get-data-in-range",
       "description": "Base API URL"
-    },
-    {
-      "name": "binWidth",
-      "update": "(endTime - beginTime) / bins"
     },
     {
       "name": "trackArray",
@@ -73,122 +28,6 @@
     {
       "name": "trackHeight",
       "update": "height / numTracks"
-    },
-    {
-      "name": "baseChartWidth",
-      "value": 1200,
-      "description": "Base chart width"
-    },
-    {
-      "name": "baseChartHeight",
-      "value": 600, 
-      "description": "Base chart height"
-    },
-    {
-      "name": "zoomX",
-      "value": 1,
-      "on": [
-        {
-          "events": {"type": "wheel", "consume": true, "markname": "chartArea"},
-          "update": "event.shiftKey || event.metaKey ? clamp(zoomX * pow(1.1, -event.deltaY * 0.01), 0.5, 10) : zoomX"
-        }
-      ],
-      "description": "Horizontal zoom factor"
-    },
-    {
-      "name": "zoomY",
-      "value": 1,
-      "on": [
-        {
-          "events": {"type": "wheel", "consume": true, "markname": "chartArea"},
-          "update": "event.shiftKey || event.metaKey ? clamp(zoomY * pow(1.1, -event.deltaY * 0.01), 0.5, 10) : zoomY"
-        }
-      ],
-      "description": "Vertical zoom factor"
-    },
-    {
-      "name": "isDragging",
-      "value": false,
-      "on": [
-        {
-          "events": {"type": "mousedown", "markname": "chartArea"},
-          "update": "true"
-        },
-        {
-          "events": {"type": "mouseup", "source": "window"},
-          "update": "false"
-        }
-      ]
-    },
-    {
-      "name": "dragStartX",
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "mousedown", "markname": "chartArea"},
-          "update": "event.x"
-        }
-      ]
-    },
-    {
-      "name": "dragStartY",
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "mousedown", "markname": "chartArea"},
-          "update": "event.y"
-        }
-      ]
-    },
-    {
-      "name": "dragStartOffsetX",
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "mousedown", "markname": "chartArea"},
-          "update": "xOffset"
-        }
-      ]
-    },
-    {
-      "name": "dragStartOffsetY",
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "mousedown", "markname": "chartArea"},
-          "update": "yOffset"
-        }
-      ]
-    },
-    {
-      "name": "xOffset",
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "wheel", "consume": true, "markname": "chartArea"},
-          "update": "!(event.shiftKey || event.metaKey) ? clamp(xOffset - (event.deltaX * 2), -(chartWidth - viewWidth), 0) : xOffset"
-        },
-        {
-          "events": {"type": "mousemove", "source": "window", "between": [{"type": "mousedown", "markname": "chartArea"}, {"type": "mouseup", "source": "window"}]},
-          "update": "isDragging ? clamp(dragStartOffsetX + (event.x - dragStartX), -(chartWidth - viewWidth), 0) : xOffset"
-        }
-      ],
-      "description": "Horizontal pan offset"
-    },
-    {
-      "name": "yOffset", 
-      "value": 0,
-      "on": [
-        {
-          "events": {"type": "wheel", "consume": true, "markname": "chartArea"},
-          "update": "!(event.shiftKey || event.metaKey) ? clamp(yOffset - (event.deltaY * 2), -(chartHeight - viewHeight), 0) : yOffset"
-        },
-        {
-          "events": {"type": "mousemove", "source": "window", "between": [{"type": "mousedown", "markname": "chartArea"}, {"type": "mouseup", "source": "window"}]},
-          "update": "isDragging ? clamp(dragStartOffsetY + (event.y - dragStartY), -(chartHeight - viewHeight), 0) : yOffset"
-        }
-      ],
-      "description": "Vertical pan offset"
     }
   ],
   
@@ -216,13 +55,7 @@
           "expr": "datum.metadata.bins",
           "as": "metaBins"
         }
-      ],
-      // "on": [
-      //   {
-      //     "trigger": "data('rawData')[0]",
-      //     "update": "[{xDomain: [data('rawData')[0].metaBegin, data('rawData')[0].metaEnd]}]"
-      //   }
-      // ]
+      ]
     },
     {
       "name": "trackData",
@@ -348,55 +181,25 @@
     { 
       "orient": "left", 
       "scale": "yScale", 
-      "title": "Tracks"
+      "title": "Tracks",
+      "grid": true,
+      "bandPosition": "0"
     }
   ],
   
   "marks": [
     {
       "type": "group",
-      "name": "chartArea",
-      "clip": true,
+      "from": {"data": "processedData"},
       "encode": {
         "update": {
-          "width": {"signal": "viewWidth"},
-          "height": {"signal": "viewHeight"},
-          "cursor": {"signal": "isDragging ? 'grabbing' : 'grab'"}
+          "x": {"scale": "xScale", "field": "timeStart"},
+          "x2": {"scale": "xScale", "field": "timeEnd"},
+          "y": {"scale": "yScale", "field": "track"},
+          "height": {"scale": "yScale", "band": 1},
+          "fill": {"scale": "colorScale", "field": "barType"}
         }
-      },
-      "marks": [
-        {
-          "type": "rect",
-          "from": {"data": "processedData"},
-          "encode": {
-            "update": {
-              "x": {"scale": "xScale", "field": "timeStart", "offset": {"signal": "xOffset"}},
-              "x2": {"scale": "xScale", "field": "timeEnd", "offset": {"signal": "xOffset"}},
-              "y": {"scale": "yScale", "field": "track", "offset": {"signal": "yOffset"}},
-              "height": {"scale": "yScale", "band": 1},
-              "fill": {"scale": "colorScale", "field": "barType"},
-              "stroke": "#ffffff",
-              "strokeWidth": 1,
-              "opacity": 0.8
-            },
-            "hover": {
-              "opacity": 1,
-              "stroke": "#000000",
-              "strokeWidth": 2
-            }
-          }
-        }
-      ]
+      }
     }
-  ],
-  
-  "config": {
-    "axis": {
-      "labelFontSize": 10,
-      "titleFontSize": 12
-    },
-    "view": {
-      "stroke": "transparent"
-    }
-  }
+  ]
 }
