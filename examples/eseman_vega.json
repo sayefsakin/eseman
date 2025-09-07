@@ -183,7 +183,7 @@
       "scale": "yScale", 
       "title": "Tracks",
       "grid": true,
-      "bandPosition": "0"
+      "bandPosition": 0
     }
   ],
   

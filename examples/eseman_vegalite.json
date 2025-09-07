@@ -1,0 +1,128 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Gantt Chart with API Data",
+  "width": 600,
+  "height": 200,
+  "padding": 5,
+  "params": [
+    {
+      "name": "bins",
+      "value": 1000
+    },
+    {
+      "name": "apiUrl", 
+      "value": "http://127.0.0.1:8080/get-data-in-range"
+    }
+  ],
+  "data": {
+    "url": "http://127.0.0.1:8080/get-data-in-range?bins=1000",
+    "format": {"type": "json"}
+  },
+  "transform": [
+    {
+      "calculate": "datum.metadata.begin",
+      "as": "metaBegin"
+    },
+    {
+      "calculate": "datum.metadata.end", 
+      "as": "metaEnd"
+    },
+    {
+      "calculate": "datum.metadata.bins",
+      "as": "metaBins"
+    },
+    {
+      "flatten": ["data"]
+    },
+    {
+      "calculate": "datum.data.track",
+      "as": "track"
+    },
+    {
+      "calculate": "datum.data.utils",
+      "as": "utils"
+    },
+    {
+      "calculate": "sequence(0, length(datum.utils))",
+      "as": "binIndices"
+    },
+    {
+      "flatten": ["binIndices"]
+    },
+    {
+      "calculate": "datum.binIndices",
+      "as": "binIndex"
+    },
+    {
+      "calculate": "datum.utils[datum.binIndex]",
+      "as": "utilValue"
+    },
+    {
+      "calculate": "parseFloat(datum.utilValue)",
+      "as": "utilFloat"
+    },
+    {
+      "filter": "datum.utilFloat > 0"
+    },
+    {
+      "calculate": "(datum.metaEnd - datum.metaBegin) / datum.metaBins",
+      "as": "binDuration"
+    },
+    {
+      "calculate": "datum.metaBegin + (datum.binIndex * datum.binDuration)",
+      "as": "timeStart"
+    },
+    {
+      "calculate": "datum.timeStart + datum.binDuration",
+      "as": "timeEnd"
+    },
+    {
+      "calculate": "datum.utilFloat >= 1.0 ? 'solid' : 'partial'",
+      "as": "barType"
+    }
+  ],
+  "mark": {
+    "type": "rect",
+    "tooltip": true
+  },
+  "encoding": {
+    "x": {
+      "field": "timeStart",
+      "type": "temporal",
+      "scale": {"type": "utc", "nice": false},
+      "axis": {
+        "title": "Time",
+        "format": "%s",
+        "labelOverlap": "greedy"
+      }
+    },
+    "x2": {
+      "field": "timeEnd",
+      "type": "temporal"
+    },
+    "y": {
+      "field": "track",
+      "type": "ordinal",
+      "sort": true,
+      "scale": {"padding": 0.1},
+      "axis": {
+        "title": "Tracks",
+        "grid": true
+      }
+    },
+    "color": {
+      "field": "barType",
+      "type": "nominal",
+      "scale": {
+        "domain": ["solid", "partial"],
+        "range": ["#000000", "#9ca3af"]
+      },
+      "legend": {"title": "Bar Type"}
+    }
+  },
+  "resolve": {
+    "scale": {
+      "color": "independent"
+    }
+  }
+}
