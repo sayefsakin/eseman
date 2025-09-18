@@ -9,11 +9,6 @@ This C++ program uses
 - [Boost.Beast](https://github.com/boostorg/beast) for serving data over http using REST API.
 - [LMDB](http://www.lmdb.tech/doc/) for fast key-value storage.
 
-Execute [install_dependencies.sh](install_dependencies.sh) to install the prerequisite libraries.
-```
-source install_dependencies.sh
-```
-
 Additionally, ESeMan uses the following libraries as a submodule
 - [RapidJSON](https://rapidjson.org/) for json handling.
 - [hclust](https://github.com/cdalitz/hclust-cpp) for basic agglomerative clustering implementation.
@@ -21,6 +16,11 @@ Additionally, ESeMan uses the following libraries as a submodule
 Clone with the submodules using the following command,
 ```
 git clone --recursive https://github.com/sayefsakin/eseman.git
+```
+
+Execute [install_dependencies.sh](install_dependencies.sh) to install the prerequisite libraries.
+```
+source install_dependencies.sh
 ```
 
 ### Input File
@@ -107,6 +107,7 @@ Calling the eseman api with [http://127.0.0.1:8080/get-data-in-range?bins=10](ht
 ```
 
 Here, `bins` is the chart width in number of pixels.
+
 ### Architecture
 
 ![ESeMan Library](resources/framework.png)
