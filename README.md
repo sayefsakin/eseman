@@ -20,6 +20,7 @@ git clone --recursive https://github.com/sayefsakin/eseman.git
 
 Execute [install_dependencies.sh](install_dependencies.sh) to install the prerequisite libraries.
 ```
+cd eseman
 source install_dependencies.sh
 ```
 
