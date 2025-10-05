@@ -2,7 +2,7 @@
     "default": {
         "horizontal_pixel_window": 1,
         "vertical_pixel_window": 1,
-        "database_location": "/mnt/d/eseman_dataset_backups",
+        "database_location": "~",
         "database_name": "ecc21d0a-112a-4b52-8cdd-6aca80adde93",
         "LMDB_DATABASE_TOTAL_SIZE": "1073741824",
         "ESEMAN_SPLITTING_RULE": "FAIR",
