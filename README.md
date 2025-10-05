@@ -18,6 +18,12 @@ Clone with the submodules using the following command,
 git clone --recursive https://github.com/sayefsakin/eseman.git
 ```
 
+If already cloned without the submodules, then pull submodule files with the following command,
+
+```
+git submodule update --init
+```
+
 Execute [install_dependencies.sh](install_dependencies.sh) to install the prerequisite libraries.
 ```
 cd eseman
@@ -33,7 +39,6 @@ ESeMan now only takes input file in JSON format. Also, update the following para
 ### Build and Run
 
 ```
-cd eseman
 make
 ./eseman_data_server -h
 ```
@@ -43,7 +48,7 @@ make
 To index the data within LMDB, the input file needs to be bundled using the following command.
 
 ```
-./eseman_data_server -b -i input_file/<file_name>.json
+./eseman_data_server -b -i input_data/<file_name>.json
 ```
 
 *Warning: the bundling process can take longer based on the input file size.*
