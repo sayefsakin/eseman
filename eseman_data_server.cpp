@@ -225,7 +225,7 @@ Document esemanGetAttributeQuery(uint64_t cTime, uint64_t cLocation) {
     if(new_result.length()>0) {
         Value val(kObjectType);
         val.SetString(new_result.c_str(), static_cast<SizeType>(new_result.length()), allocator);
-        document.AddMember("event_id", val, allocator);
+        document.AddMember("primitive", val, allocator);
     }
     return document;
 }
@@ -331,6 +331,7 @@ class HttpSession : public enable_shared_from_this<HttpSession> {
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
     http::request<http::string_body> req_;
+    bool get_data_range_running = false;
 
 public:
     explicit HttpSession(tcp::socket&& socket) : stream_(move(socket)) {}
@@ -485,6 +486,13 @@ private:
             res.body() = create_error_json(params_valid_string);
         }
         else if (boost::starts_with(target, "/get-data-in-range")) {
+            if(get_data_range_running) {
+                res.result(http::status::too_many_requests);
+                res.body() = create_error_json("Another get-data-in-range request is still being processed. Please try again later.");
+                res.prepare_payload();
+                return send_response(move(res));
+            }
+            get_data_range_running = true;
             int64_t time_begin = -1;
             if(query_params.find("begin") != query_params.end() && !query_params["begin"].empty())
                 time_begin = stoll(query_params["begin"]);
@@ -526,6 +534,7 @@ private:
                 res.result(http::status::internal_server_error);
                 res.body() = create_error_json("Data structure not initialized");
             }
+            get_data_range_running = false;
         }
         else if (boost::starts_with(target, "/get-event-attribute")) {
 
@@ -772,6 +781,23 @@ int main(int argc, char* argv[]) {
                 return;
             }
 
+            // double st = 0.0;
+            // double endt = 0.0;
+            // string location = "";
+            // string primitive = "";
+            // string intervalId = "";
+            // if(d.HasMember("ts")) {
+            //     st = (double)d["ts"].GetInt64();
+            //     int64_t dur = d["dur"].GetInt64();
+            //     if (dur > 0) {
+            //         endt = st + (double)dur;
+            //         // location = d.HasMember("args") ? to_string(d["args"]["level"].GetInt64()) : "1";
+            //         location = d.HasMember("cat") ? d["cat"].GetString() : "1";
+            //         primitive = d.HasMember("name") ? d["name"].GetString() : "";
+            //         intervalId = d.HasMember("id") ? to_string(d["id"].GetInt64()) : "0";
+            //     }
+            //     esemanKDT->insertDataIntoTree(st, endt, location, primitive, intervalId);
+            // }
             if(agglomerateClusters != nullptr) {
                 agglomerateClusters->insertDataIntoTree((double)d["enter"]["Timestamp"].GetInt64(),
                                                         (double)d["leave"]["Timestamp"].GetInt64(),

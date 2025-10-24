@@ -819,14 +819,14 @@ string EseManKDT::findNearestEvent(uint64_t cTime, uint64_t cLocation) {
   
 
   int64_t result = -1;
-  return_attribute_key = "ID";
+  return_attribute_key = "primitive";
   has_return_attribute_key = true;
   vector<int64_t> data_short_list;
 
   uint64_t bin_size(getBinSize(cTime, cTime+1, 1));
   findClusters(cTime, cTime+1, (int64_t)bin_size, event_data_nodes[track_index], nullptr, data_short_list, 0);
   if(data_short_list.size() > 0) result = data_short_list[0];
-  if(result >= 0) ret_result = event_data_attributes["ID"][result];
+  if(result >= 0) ret_result = event_data_attributes["primitive"][result];
   data_short_list.clear();
   return_attribute_key = "";
   has_return_attribute_key = false;
